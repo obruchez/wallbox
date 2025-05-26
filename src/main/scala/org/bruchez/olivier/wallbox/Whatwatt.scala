@@ -8,6 +8,16 @@ import java.time.format.DateTimeFormatter
 import java.time.{Duration, ZonedDateTime}
 import scala.util.Try
 
+object Whatwatt {
+  case class Report(
+      dateTime: ZonedDateTime,
+      positiveActiveInstantaneousPower: Double,
+      negativeActiveInstantaneousPower: Double
+  )
+
+  def apply(): Whatwatt = Whatwatt(host = sys.env("WHATWATT_HOST"))
+}
+
 case class Whatwatt(host: String) {
   private val httpClient = HttpClient
     .newBuilder()
@@ -85,12 +95,4 @@ case class Whatwatt(host: String) {
       }
     }
   }
-}
-
-object Whatwatt {
-  case class Report(
-      dateTime: ZonedDateTime,
-      positiveActiveInstantaneousPower: Double,
-      negativeActiveInstantaneousPower: Double
-  )
 }

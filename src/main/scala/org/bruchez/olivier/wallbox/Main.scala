@@ -4,17 +4,22 @@ import scala.util.control.Breaks._
 
 object Main {
   def main(args: Array[String]): Unit = {
-    val whatwatt = Whatwatt("192.168.50.252")
+    val kostal = Kostal()
+    val whatwatt = Whatwatt()
 
     val PeriodInMs = 1000
 
-    println("Starting Whatwatt monitoring (press Ctrl-C to stop)...")
+    println("Press Ctrl-C to stop...")
 
     breakable {
       while (true) {
         try {
-          val report = whatwatt.report().get
-          println(s"Report: $report")
+          val kostalOutputPowerInWatts = kostal.outputPowerInWatts().get
+          val whatwattReport = whatwatt.report().get
+
+          println(s"Kostal: $kostalOutputPowerInWatts W")
+          println(s"Whatwatt: $whatwattReport")
+
           Thread.sleep(PeriodInMs)
         } catch {
           case _: InterruptedException =>
@@ -27,7 +32,5 @@ object Main {
         }
       }
     }
-
-    println("Whatwatt monitoring stopped")
   }
 }
