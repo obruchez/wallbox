@@ -11,9 +11,15 @@ import scala.util.Try
 object Whatwatt {
   case class Report(
       dateTime: ZonedDateTime,
-      positiveActiveInstantaneousPower: Double,
-      negativeActiveInstantaneousPower: Double
-  )
+      inPowerInWatts: Double,
+      outPowerInWatts: Double
+  ) {
+    // Assumption: we either have: inPowerInWatts >= 0 and outPowerInWatts  = 0
+    //                         or: inPowerInWatts  = 0 and outPowerInWatts >= 0
+    //
+    // gridPowerInWatts = inPowerInWatts (if inPowerInWatts >= 0) or -outPowerInWatts (if outPowerInWatts >= 0)
+    lazy val gridPowerInWatts: Double = inPowerInWatts - outPowerInWatts
+  }
 
   def apply(): Whatwatt = Whatwatt(host = sys.env("WHATWATT_HOST"))
 }
@@ -86,8 +92,8 @@ case class Whatwatt(host: String) {
 
           Whatwatt.Report(
             dateTime = dateTime,
-            positiveActiveInstantaneousPower = positiveActive,
-            negativeActiveInstantaneousPower = negativeActive
+            inPowerInWatts = positiveActive * 1000.0,
+            outPowerInWatts = negativeActive * 1000.0
           )
 
         case Left(error) =>

@@ -8,7 +8,9 @@ import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.util.Base64
-import scala.util.{Failure, Success, Try}
+import scala.util.Try
+
+// See https://github.com/SKB-CGN/wallbox
 
 object Wallbox {
   def apply(): Wallbox = Wallbox(
@@ -17,23 +19,13 @@ object Wallbox {
     chargerId = sys.env("WALLBOX_CHARGER_ID")
   )
 
-  def test(): Unit = {
-    val wallbox = Wallbox()
+  case class BasicStatus(rawJsonResponse: String)
 
-    val unitTry =
-      for {
-        token <- wallbox.authenticationToken()
-        _ <- wallbox.updateCharger(token, "maxChargingCurrent", Json.fromInt(21))
-      } yield ()
-
-    unitTry match {
-      case Success(_) =>
-        println("Update successful")
-
-      case Failure(t) =>
-        println(s"Failure: ${t.getMessage}")
-    }
-  }
+  // TODO: charging_power => "charging_power": 10.9445 (kW)
+  // TODO: last_sync => "last_sync": "2025-05-27 20:32:28"
+  // TODO: "status_id" (e.g. 194 charging, 181 Waiting for car demand, etc.)
+  // TODO: "config_data"."max_charging_current" (e.g. 21)
+  case class ExtendedStatus(rawJsonResponse: String)
 }
 
 case class Wallbox(username: String, password: String, chargerId: String) {
@@ -41,6 +33,8 @@ case class Wallbox(username: String, password: String, chargerId: String) {
   private val BASEURL = "https://api.wall-box.com/"
   private val URL_AUTHENTICATION = "auth/token/user"
   private val URL_CHARGER = "v2/charger/"
+  private val URL_STATUS = "chargers/status/"
+
   private val conn_timeout = Duration.ofMillis(3000)
 
   private def createHttpClient(): HttpClient = {
@@ -69,89 +63,77 @@ case class Wallbox(username: String, password: String, chargerId: String) {
     }
   }
 
-  def authenticationToken(): Try[String] = {
-    Try {
-      val client = createHttpClient()
+  def authenticationToken(): Try[String] = Try {
+    val client = createHttpClient()
 
-      val credentials = s"$username:$password"
-      val encodedCredentials = Base64.getEncoder.encodeToString(
-        credentials.getBytes(StandardCharsets.UTF_8)
-      )
+    val credentials = s"$username:$password"
+    val encodedCredentials = Base64.getEncoder.encodeToString(
+      credentials.getBytes(StandardCharsets.UTF_8)
+    )
 
-      val request = createRequestBuilder(BASEURL + URL_AUTHENTICATION)
-        .header("Authorization", s"Basic $encodedCredentials")
-        .POST(HttpRequest.BodyPublishers.ofString(""))
-        .build()
+    val request = createRequestBuilder(BASEURL + URL_AUTHENTICATION)
+      .header("Authorization", s"Basic $encodedCredentials")
+      .POST(HttpRequest.BodyPublishers.ofString(""))
+      .build()
 
-      val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-      val responseBody = checkResponseStatus(response, "Authentication")
+    val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+    val responseBody = checkResponseStatus(response, "Authentication")
 
-      parse(responseBody) match {
-        case Right(json) =>
-          json.hcursor.downField("jwt").as[String] match {
-            case Right(jwt) => jwt
-            case Left(_)    => throw new RuntimeException("JWT token not found in response")
-          }
-        case Left(error) =>
-          throw new RuntimeException(s"Failed to parse JSON response: ${error.getMessage}")
-      }
+    parse(responseBody) match {
+      case Right(json) =>
+        json.hcursor.downField("jwt").as[String] match {
+          case Right(jwt) => jwt
+          case Left(_)    => throw new RuntimeException("JWT token not found in response")
+        }
+      case Left(error) =>
+        throw new RuntimeException(s"Failed to parse JSON response: ${error.getMessage}")
     }
   }
 
-  def updateCharger(token: String, key: String, value: Json): Try[String] = {
-    Try {
-      val client = createHttpClient()
 
-      val jsonPayload = Json.obj(key -> value).noSpaces
+  private def updateCharger(token: String, key: String, value: Json): Try[String] = Try {
+    val client = createHttpClient()
 
-      val request = createRequestBuilder(BASEURL + URL_CHARGER + chargerId)
-        .header("Authorization", s"Bearer $token")
-        .PUT(HttpRequest.BodyPublishers.ofString(jsonPayload))
-        .build()
+    val jsonPayload = Json.obj(key -> value).noSpaces
 
-      val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-      checkResponseStatus(response, "Update charger")
-    }
+    val request = createRequestBuilder(BASEURL + URL_CHARGER + chargerId)
+      .header("Authorization", s"Bearer $token")
+      .PUT(HttpRequest.BodyPublishers.ofString(jsonPayload))
+      .build()
+
+    val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+    checkResponseStatus(response, "Update charger")
   }
 
-  // See https://github.com/SKB-CGN/wallbox
+  def setMaxCurrent(token: String, maxCurrenInAmperes: Int): Try[Unit] =
+    updateCharger(token, "maxChargingCurrent", Json.fromInt(maxCurrenInAmperes)).map(_ => ())
 
-  /*
-let password = 'YourPassword';
-let email = 'you@email.com';
-let charger_id = 'idOfTheCharger';
-let wallbox_token = '';
-let conn_timeout = 3000;
+  // We don't need anything from the basic status at the moment; everything we need is in the extended status
+  def basicStatus(token: String): Try[Wallbox.BasicStatus] = Try {
+    val client = createHttpClient()
 
-const BASEURL = 'https://api.wall-box.com/';
-const URL_AUTHENTICATION = 'auth/token/user';
-const URL_CHARGER = 'v2/charger/';
-const URL_CHARGER_CONTROL = 'v3/chargers/';
-const URL_CHARGER_MODES = 'v4/chargers/';
-const URL_CHARGER_ACTION = '/remote-action';
-const URL_STATUS = 'chargers/status/';
-const URL_CONFIG = 'chargers/config/';
-const URL_REMOTE_ACTION = '/remote-action/';
-const URL_ECO_SMART = '/eco-smart/';
-   */
+    val request = createRequestBuilder(BASEURL + URL_CHARGER + chargerId)
+      .header("Authorization", s"Bearer $token")
+      .GET()
+      .build()
 
-  /*
-  Control the Wallbox:
+    val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+    val body = checkResponseStatus(response, "Basic status")
 
-  const options = {
-    url: BASEURL + URL_CHARGER + charger_id,
-    timeout: conn_timeout,
-    method: 'PUT',
-    headers: {
-        'Authorization': 'Bearer ' + wallbox_token,
-        'Accept': 'application/json, text/plain, */ /*',
-        'Content-Type': 'application/json;charset=utf-8',
-    },
-    data: JSON.stringify({
-      [key]: value
-    })
+    Wallbox.BasicStatus(body)
   }
-   */
 
-  // etc.
+  def extendedStatus(token: String): Try[Wallbox.ExtendedStatus] = Try {
+    val client = createHttpClient()
+
+    val request = createRequestBuilder(BASEURL + URL_STATUS + chargerId)
+      .header("Authorization", s"Bearer $token")
+      .GET()
+      .build()
+
+    val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+    val body = checkResponseStatus(response, "Extended status")
+
+    Wallbox.ExtendedStatus(body)
+  }
 }
