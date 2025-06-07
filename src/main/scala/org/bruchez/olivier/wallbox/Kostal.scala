@@ -28,7 +28,7 @@ case class Kostal(host: String, password: String) {
   def outputPowerInWatts(): Try[Double] = {
     for {
       _ <- login()
-      power <- getCurrentPower()
+      power <- getOutputPowerInWatts()
     } yield power
   }
 
@@ -240,7 +240,7 @@ case class Kostal(host: String, password: String) {
     )
   }
 
-  private def getCurrentPower(): Try[Double] = Try {
+  private def getOutputPowerInWatts(): Try[Double] = Try {
     val sid = sessionId.getOrElse(throw new RuntimeException("Not logged in"))
 
     val request = HttpRequest

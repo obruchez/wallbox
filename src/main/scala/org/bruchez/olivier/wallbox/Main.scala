@@ -26,8 +26,8 @@ object Main {
 
           println(s"Kostal: $kostalOutputPowerInWatts W")
           println(s"Whatwatt: ${whatwattReport.gridPowerInWatts} W")
-          println(s"Basic Wallbox information: ${basicWallboxStatus.rawJsonResponse}")
-          println(s"Extended Wallbox information: ${extendedWallboxStatus.rawJsonResponse}")
+          // println(s"Basic Wallbox information: ${basicWallboxStatus.rawJsonResponse}")
+          println(s"Extended Wallbox information: ${extendedWallboxStatus /*.rawJsonResponse*/}")
           println()
 
           Thread.sleep(PeriodInMs)

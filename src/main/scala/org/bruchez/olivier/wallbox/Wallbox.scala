@@ -2,11 +2,13 @@ package org.bruchez.olivier.wallbox
 
 import io.circe._
 import io.circe.parser._
+import org.bruchez.olivier.wallbox.Wallbox.ExtendedStatus
 
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.nio.charset.StandardCharsets
-import java.time.Duration
+import java.time.format.DateTimeFormatter
+import java.time.{Duration, LocalDateTime}
 import java.util.Base64
 import scala.util.Try
 
@@ -21,11 +23,36 @@ object Wallbox {
 
   case class BasicStatus(rawJsonResponse: String)
 
-  // TODO: charging_power => "charging_power": 10.9445 (kW)
-  // TODO: last_sync => "last_sync": "2025-05-27 20:32:28"
-  // TODO: "status_id" (e.g. 194 charging, 181 Waiting for car demand, etc.)
-  // TODO: "config_data"."max_charging_current" (e.g. 21)
-  case class ExtendedStatus(rawJsonResponse: String)
+  // TODO: add sealed trait / enum for statusId
+  // TODO: check why lastSync is "old" (only the case if no charging is taking place?)
+
+  case class ExtendedStatus(
+      lastSync: LocalDateTime,
+      chargingPowerInWatts: Double,
+      statusId: Int,
+      maxChargingCurrentInAmperes: Int
+  )
+
+  object ExtendedStatus {
+    implicit val extendedStatusDecoder: Decoder[ExtendedStatus] = new Decoder[ExtendedStatus] {
+      final def apply(c: HCursor): Decoder.Result[ExtendedStatus] = {
+        val dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
+        for {
+          lastSyncStr <- c.downField("last_sync").as[String]
+          lastSync = LocalDateTime.parse(lastSyncStr, dateTimeFormatter)
+          chargingPower <- c.downField("charging_power").as[Double]
+          statusId <- c.downField("status_id").as[Int]
+          maxChargingCurrent <- c.downField("config_data").downField("max_charging_current").as[Int]
+        } yield ExtendedStatus(
+          lastSync = lastSync,
+          chargingPowerInWatts = chargingPower * 1000,
+          statusId = statusId,
+          maxChargingCurrentInAmperes = maxChargingCurrent
+        )
+      }
+    }
+  }
 }
 
 case class Wallbox(username: String, password: String, chargerId: String) {
@@ -90,7 +117,6 @@ case class Wallbox(username: String, password: String, chargerId: String) {
     }
   }
 
-
   private def updateCharger(token: String, key: String, value: Json): Try[String] = Try {
     val client = createHttpClient()
 
@@ -134,6 +160,11 @@ case class Wallbox(username: String, password: String, chargerId: String) {
     val response = client.send(request, HttpResponse.BodyHandlers.ofString())
     val body = checkResponseStatus(response, "Extended status")
 
-    Wallbox.ExtendedStatus(body)
+    val result: Either[Error, ExtendedStatus] = for {
+      json <- parse(body)
+      status <- json.as[ExtendedStatus]
+    } yield status
+
+    result.fold(throw _, identity)
   }
 }
