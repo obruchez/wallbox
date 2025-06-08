@@ -1,6 +1,7 @@
 package org.bruchez.olivier.wallbox
 
 import java.nio.file.{Path, Paths}
+import java.time.Instant
 import scala.util.control.Breaks.{break, breakable}
 import scala.util.{Success, Try}
 
@@ -64,6 +65,15 @@ class Optimizer(
       println(f"Grid power           : $gridPowerInWatts%.2f W")
       println(f"Charging power       : $chargingPowerInWatts%.2f W")
       println(f"Max. charging current: $maxChargingCurrentInAmperes A")
+      println()
+
+      currentPowerConversion.addObservedValues(
+        instant = Instant.now(),
+        maxCurrenInAmperes = maxChargingCurrentInAmperes,
+        powerInWatts = chargingPowerInWatts
+      )
+
+      currentPowerConversion.printObservedCurrentCounts()
       println()
 
       // Step 1: estimate total household consumption excluding charger

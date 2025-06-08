@@ -1,8 +1,8 @@
 package org.bruchez.olivier.wallbox
 
 import java.nio.file.Path
+import java.time.Instant
 import scala.collection.mutable
-import java.time.LocalDateTime
 import scala.util.Try
 
 case class CurrentPowerConversion(
@@ -10,16 +10,16 @@ case class CurrentPowerConversion(
     timeToLiveInSeconds: Int,
     decayLambda: Double
 ) {
-  private case class ObservedPower(dateTime: LocalDateTime, powerInWatts: Double)
+  private case class ObservedPower(instant: Instant, powerInWatts: Double)
 
   private val observedValues = mutable.Map[Int, List[ObservedPower]]()
 
   def addObservedValues(
-      dateTime: LocalDateTime,
+      instant: Instant,
       maxCurrenInAmperes: Int,
       powerInWatts: Double
   ): Unit = {
-    val observedPower = ObservedPower(dateTime, powerInWatts)
+    val observedPower = ObservedPower(instant, powerInWatts)
     observedValues(maxCurrenInAmperes) =
       observedPower :: observedValues.getOrElse(maxCurrenInAmperes, Nil)
 
@@ -38,6 +38,12 @@ case class CurrentPowerConversion(
 
   def saveTo(jsonFile: Path): Unit = {
     // TODO: serialize values to JSON file
+  }
+
+  def printObservedCurrentCounts(): Unit = {
+    val countsAsString =
+      observedValues.toSeq.sortBy(_._1).map(kv => s"${kv._1} A -> ${kv._2.size}").mkString(", ")
+    println(s"Observed currents: $countsAsString")
   }
 }
 
