@@ -16,6 +16,10 @@ import scala.util.Try
 // See https://github.com/SKB-CGN/wallbox
 
 object Wallbox {
+  // TODO: can this be dynamically determined?
+  val MinPowerLimitInAmperes = 6
+  val MaxPowerLimitInAmperes = 32
+
   def apply(): Wallbox = Wallbox(
     username = sys.env("WALLBOX_USERNAME"),
     password = sys.env("WALLBOX_PASSWORD"),
@@ -92,6 +96,12 @@ object Wallbox {
     case class Unknown(id: Int) extends Status
 
     def fromId(id: Int): Status = values.find(_.id == id).getOrElse(Unknown(id))
+  }
+
+  implicit class StatusOps(status: Status) {
+    import Status._
+
+    def charging: Boolean = Set[Status](Charging193, Charging194, Charging195).contains(status)
   }
 }
 
@@ -171,6 +181,12 @@ case class Wallbox(username: String, password: String, chargerId: String) {
     checkResponseStatus(response, "Update charger")
   }
 
+  def setMaxCurrent(maxCurrenInAmperes: Int): Try[Unit] =
+    for {
+      token <- authenticationToken()
+      _ <- setMaxCurrent(token, maxCurrenInAmperes)
+    } yield ()
+
   def setMaxCurrent(token: String, maxCurrenInAmperes: Int): Try[Unit] =
     updateCharger(token, "maxChargingCurrent", Json.fromInt(maxCurrenInAmperes)).map(_ => ())
 
@@ -188,6 +204,12 @@ case class Wallbox(username: String, password: String, chargerId: String) {
 
     Wallbox.BasicStatus(body)
   }
+
+  def extendedStatus(): Try[Wallbox.ExtendedStatus] =
+    for {
+      token <- authenticationToken()
+      extendedStatus <- extendedStatus(token)
+    } yield extendedStatus
 
   def extendedStatus(token: String): Try[Wallbox.ExtendedStatus] = Try {
     val client = createHttpClient()

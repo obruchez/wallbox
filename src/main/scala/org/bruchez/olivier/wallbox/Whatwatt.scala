@@ -14,8 +14,8 @@ object Whatwatt {
       inPowerInWatts: Double,
       outPowerInWatts: Double
   ) {
-    // Assumption: we either have: inPowerInWatts >= 0 and outPowerInWatts  = 0
-    //                         or: inPowerInWatts  = 0 and outPowerInWatts >= 0
+    // Assumption: we either have: inPowerInWatts >= 0 and outPowerInWatts  = 0 (consumption/import)
+    //                         or: inPowerInWatts  = 0 and outPowerInWatts >= 0 (injection/export)
     //
     // gridPowerInWatts = inPowerInWatts (if inPowerInWatts >= 0) or -outPowerInWatts (if outPowerInWatts >= 0)
     lazy val gridPowerInWatts: Double = inPowerInWatts - outPowerInWatts
