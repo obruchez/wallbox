@@ -3,6 +3,7 @@ package org.bruchez.olivier.wallbox
 import java.nio.file.Path
 import scala.collection.mutable
 import java.time.LocalDateTime
+import scala.util.Try
 
 case class CurrentPowerConversion(
     maxObservedValuesPerMaxCurrent: Int,
@@ -24,7 +25,7 @@ case class CurrentPowerConversion(
 
     // TODO: only keep max N "power" values for each "max current" value
     // TODO: only keep "power values" for a maximum of T time (e.g. 10 minutes)
-    // TODO: but always keep at least 1 value
+    // TODO: but always keep at least 1 value (should this be the actual latest value or an average?)
   }
 
   def powerInWatts(maxCurrenInAmperes: Int): Option[Double] = {
@@ -41,13 +42,27 @@ case class CurrentPowerConversion(
 }
 
 object CurrentPowerConversion {
-  def loadFrom(
-      jsonFile: Path,
-      maxObservedValuesPerMaxCurrent: Int,
-      timeToLiveInSeconds: Int,
-      decayLambda: Double
-  ): CurrentPowerConversion = {
-    // TODO: load from JSON file
-    CurrentPowerConversion(maxObservedValuesPerMaxCurrent, timeToLiveInSeconds, decayLambda)
+  private val DefaultMaxObservedValuesPerMaxCurrent = 4096
+  private val DefaultTimeToLiveInSeconds = 10 * 60
+  private val DefaultDecayLambda = 0.9
+
+  def apply(): CurrentPowerConversion =
+    CurrentPowerConversion(
+      maxObservedValuesPerMaxCurrent = Try(sys.env("WALLBOX_MAX_OBSERVED_VALUES_PER_MAX_CURRENT"))
+        .map(_.toInt)
+        .getOrElse(DefaultMaxObservedValuesPerMaxCurrent),
+      timeToLiveInSeconds = Try(sys.env("WALLBOX_TIME_TO_LIVE_IN_SECONDS"))
+        .map(_.toInt)
+        .getOrElse(DefaultTimeToLiveInSeconds),
+      decayLambda =
+        Try(sys.env("WALLBOX_DECAY_LAMBDA")).map(_.toDouble).getOrElse(DefaultDecayLambda)
+    )
+
+  def loadFrom(jsonFile: Path): CurrentPowerConversion = {
+    val currentPowerConversion = CurrentPowerConversion()
+
+    // TODO: load from JSON file and call addObservedValues for each value from the JSON file
+
+    currentPowerConversion
   }
 }

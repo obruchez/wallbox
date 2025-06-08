@@ -1,9 +1,15 @@
 package org.bruchez.olivier.wallbox
 
+import java.nio.file.Paths
 import scala.util.control.Breaks._
 
 object Main {
   def main(args: Array[String]): Unit = {
+
+    implicit val currentPowerConversion: CurrentPowerConversion = CurrentPowerConversion.loadFrom(
+      jsonFile = Paths.get(sys.env("WALLBOX_CURRENT_POWER_CONVERSION_JSON"))
+    )
+
     val kostal = Kostal()
     val wallbox = Wallbox()
     val whatwatt = Whatwatt()
