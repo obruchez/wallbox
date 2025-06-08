@@ -1,5 +1,6 @@
 package org.bruchez.olivier.wallbox
 
+import enumeratum._
 import io.circe._
 import io.circe.parser._
 import org.bruchez.olivier.wallbox.Wallbox.ExtendedStatus
@@ -23,13 +24,12 @@ object Wallbox {
 
   case class BasicStatus(rawJsonResponse: String)
 
-  // TODO: add sealed trait / enum for statusId
   // TODO: check why lastSync is "old" (only the case if no charging is taking place?)
 
   case class ExtendedStatus(
       lastSync: LocalDateTime,
       chargingPowerInWatts: Double,
-      statusId: Int,
+      status: Status,
       maxChargingCurrentInAmperes: Int
   )
 
@@ -47,11 +47,51 @@ object Wallbox {
         } yield ExtendedStatus(
           lastSync = lastSync,
           chargingPowerInWatts = chargingPower * 1000,
-          statusId = statusId,
+          status = Status.fromId(statusId),
           maxChargingCurrentInAmperes = maxChargingCurrent
         )
       }
     }
+  }
+
+  sealed trait Status extends EnumEntry {
+    def id: Int
+  }
+
+  object Status extends Enum[Status] {
+    val values: IndexedSeq[Status] = findValues
+
+    case object Disconnected extends Status { val id = 0 }
+    case object Error14 extends Status { val id = 14 }
+    case object Error15 extends Status { val id = 15 }
+    case object Ready161 extends Status { val id = 161 }
+    case object Ready162 extends Status { val id = 162 }
+    case object Disconnected163 extends Status { val id = 163 }
+    case object Waiting extends Status { val id = 164 }
+    case object Locked extends Status { val id = 165 }
+    case object Updating extends Status { val id = 166 }
+    case object Scheduled177 extends Status { val id = 177 }
+    case object Paused extends Status { val id = 178 }
+    case object Scheduled179 extends Status { val id = 179 }
+    case object WaitingForCarDemand180 extends Status { val id = 180 }
+    case object WaitingForCarDemand181 extends Status { val id = 181 }
+    case object Paused182 extends Status { val id = 182 }
+    case object WaitingInQueueByPowerSharing183 extends Status { val id = 183 }
+    case object WaitingInQueueByPowerSharing184 extends Status { val id = 184 }
+    case object WaitingInQueueByPowerBoost185 extends Status { val id = 185 }
+    case object WaitingInQueueByPowerBoost186 extends Status { val id = 186 }
+    case object WaitingMIDFailed extends Status { val id = 187 }
+    case object WaitingMIDSafetyMarginExceeded extends Status { val id = 188 }
+    case object WaitingInQueueByEcoSmart extends Status { val id = 189 }
+    case object Charging193 extends Status { val id = 193 }
+    case object Charging194 extends Status { val id = 194 }
+    case object Charging195 extends Status { val id = 195 }
+    case object Discharging extends Status { val id = 196 }
+    case object Locked209 extends Status { val id = 209 }
+    case object LockedCarConnected extends Status { val id = 210 }
+    case class Unknown(id: Int) extends Status
+
+    def fromId(id: Int): Status = values.find(_.id == id).getOrElse(Unknown(id))
   }
 }
 

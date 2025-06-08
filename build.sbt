@@ -4,6 +4,7 @@ version := "1.0"
 
 scalaVersion := "2.13.16"
 
+libraryDependencies += "com.beachape" %% "enumeratum" % "1.9.0"
 libraryDependencies += "com.microsoft.playwright" % "playwright" % "1.52.0"
 
 libraryDependencies ++= Seq(
