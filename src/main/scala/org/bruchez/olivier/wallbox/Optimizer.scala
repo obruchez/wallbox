@@ -1,9 +1,29 @@
 package org.bruchez.olivier.wallbox
 
 import java.nio.file.{Path, Paths}
-import java.time.Instant
+import java.time.{Duration, Instant}
 import scala.util.control.Breaks.{break, breakable}
 import scala.util.{Success, Try}
+
+object Optimizer {
+  private val SecondsBeforeNoSolarProduction = 10 * 60
+
+  case class Status(
+      earliestInstantWithNoSolarProductionOpt: Option[Instant] = None,
+      carCharging: Boolean = false
+  ) {
+    // "Night mode"
+    def noSolarProduction: Boolean = earliestInstantWithNoSolarProductionOpt match {
+      case None =>
+        false
+
+      case Some(earliestInstantWithNoSolarProduction) =>
+        val secondsAgo =
+          Duration.between(earliestInstantWithNoSolarProduction, Instant.now()).getSeconds
+        secondsAgo > SecondsBeforeNoSolarProduction
+    }
+  }
+}
 
 class Optimizer(
     currentPowerConversionJsonFile: Path =
@@ -23,9 +43,11 @@ class Optimizer(
     println("Press Ctrl-C to stop...")
 
     breakable {
+      var status = Optimizer.Status()
+
       while (true) {
         try {
-          optimizeOnce().get
+          status = optimizeOnce(status).get
 
           Thread.sleep(PeriodInMs)
         } catch {
@@ -41,17 +63,17 @@ class Optimizer(
     }
   }
 
-  private def optimizeOnce(): Try[Unit] =
+  private def optimizeOnce(status: Optimizer.Status): Try[Optimizer.Status] =
     wallbox.extendedStatus().flatMap { extendedStatus =>
       if (extendedStatus.status.charging) {
-        optimizeOnceWhileCharging()
+        optimizeOnceWhileCharging(status.copy(carCharging = true))
       } else {
         println(s"Car not charging, nothing to do")
-        Success(())
+        Success(status.copy(carCharging = false))
       }
     }
 
-  private def optimizeOnceWhileCharging(): Try[Unit] = {
+  private def optimizeOnceWhileCharging(status: Optimizer.Status): Try[Optimizer.Status] = {
     for {
       solarPowerInWatts <- kostal.outputPowerInWatts()
       whatwattReport <- whatwatt.report()
@@ -76,49 +98,84 @@ class Optimizer(
       currentPowerConversion.printObservedCurrentCounts()
       println()
 
-      // Step 1: estimate total household consumption excluding charger
-      val totalHouseholdConsumptionMinusChargerInWatts =
-        solarPowerInWatts + gridPowerInWatts - chargingPowerInWatts
+      val maxChargingCurrentInAmperesToSet =
+        if (status.noSolarProduction) {
+          // Solar panels are not producing electricity => quick charging
+          println("Solar panels are not producing electricity, using maximum current value")
+          println()
 
-      println(
-        f"Total household consumption (charger excluded): $totalHouseholdConsumptionMinusChargerInWatts%.2f W"
+          Wallbox.MaxPowerLimitInAmperes
+        } else {
+          // Solar panels are producting electricity => find the optimal max. current value
+          optimalMaxChargingCurrentInAmperesIfSolarProduction(
+            solarPowerInWatts = solarPowerInWatts,
+            gridPowerInWatts = gridPowerInWatts,
+            chargingPowerInWatts = chargingPowerInWatts
+          )
+        }
+
+      wallbox.setMaxCurrent(maxChargingCurrentInAmperesToSet)
+
+      // Check if the solar panels still produce electricity
+      val newEarliestInstantWithNoSolarProductionOpt = if (solarPowerInWatts > 0.0) {
+        None
+      } else if (status.earliestInstantWithNoSolarProductionOpt.isEmpty) {
+        Some(Instant.now)
+      } else {
+        status.earliestInstantWithNoSolarProductionOpt
+      }
+
+      status.copy(earliestInstantWithNoSolarProductionOpt =
+        newEarliestInstantWithNoSolarProductionOpt
       )
-      println()
-
-      // Step 2: estimate how different "max. charging current" values would impact the grid power
-      val estimatedGridPowersInWattsByMaxChargingCurrent =
-        for (
-          tentativeMaxChargingCurrentInAmperes <-
-            Wallbox.MinPowerLimitInAmperes to Wallbox.MaxPowerLimitInAmperes
-        ) yield {
-          currentPowerConversion.powerInWatts(tentativeMaxChargingCurrentInAmperes).map {
-            estimatedChargingPowerInWatts =>
-              val estimatedGridPowerInWatts =
-                totalHouseholdConsumptionMinusChargerInWatts + estimatedChargingPowerInWatts - solarPowerInWatts
-
-              tentativeMaxChargingCurrentInAmperes -> estimatedGridPowerInWatts
-          }
-        }
-
-      val (optimalMaxChargingCurrentInAmperes, estimatedGridPowerInWatts) =
-        estimatedGridPowersInWattsByMaxChargingCurrent.flatten.minBy {
-          case (_, estimatedGridPowerInWatts) =>
-            // We want to minimize the absolute value of the grid power, i.e. consuming and injecting as little as possible
-            math.abs(estimatedGridPowerInWatts)
-        }
-
-      println(f"Optimal max. charging current        : $optimalMaxChargingCurrentInAmperes A")
-      println(f"Estimated grid power for that current: $estimatedGridPowerInWatts%.2f W")
-      println()
-
-      // Step 3: actually change the max. charging current of the charger
-      wallbox.setMaxCurrent(optimalMaxChargingCurrentInAmperes)
-
-      // TODO: if neighboring current values (i.e. current value - 1 and current value + 1) given by currentPowerConversion.powerInWatts
-      //       are None, then just take a -1 or +1 step to explore those values
-
-      // TODO: do we need to ask ourselves the question of whether the solar pannels are producing electricity (solarPowerInWatts > 0)?s
     }
+  }
+
+  private def optimalMaxChargingCurrentInAmperesIfSolarProduction(
+      solarPowerInWatts: Double,
+      gridPowerInWatts: Double,
+      chargingPowerInWatts: Double
+  ): Int = {
+
+    // Step 1: estimate total household consumption excluding charger
+    val totalHouseholdConsumptionMinusChargerInWatts =
+      solarPowerInWatts + gridPowerInWatts - chargingPowerInWatts
+
+    println(
+      f"Total household consumption (charger excluded): $totalHouseholdConsumptionMinusChargerInWatts%.2f W"
+    )
+    println()
+
+    // Step 2: estimate how different "max. charging current" values would impact the grid power
+    val estimatedGridPowersInWattsByMaxChargingCurrent =
+      for (
+        tentativeMaxChargingCurrentInAmperes <-
+          Wallbox.MinPowerLimitInAmperes to Wallbox.MaxPowerLimitInAmperes
+      ) yield {
+        currentPowerConversion.powerInWatts(tentativeMaxChargingCurrentInAmperes).map {
+          estimatedChargingPowerInWatts =>
+            val estimatedGridPowerInWatts =
+              totalHouseholdConsumptionMinusChargerInWatts + estimatedChargingPowerInWatts - solarPowerInWatts
+
+            tentativeMaxChargingCurrentInAmperes -> estimatedGridPowerInWatts
+        }
+      }
+
+    val (optimalMaxChargingCurrentInAmperes, estimatedGridPowerInWatts) =
+      estimatedGridPowersInWattsByMaxChargingCurrent.flatten.minBy {
+        case (_, estimatedGridPowerInWatts) =>
+          // We want to minimize the absolute value of the grid power, i.e. consuming and injecting as little as possible
+          math.abs(estimatedGridPowerInWatts)
+      }
+
+    println(f"Optimal max. charging current        : $optimalMaxChargingCurrentInAmperes A")
+    println(f"Estimated grid power for that current: $estimatedGridPowerInWatts%.2f W")
+    println()
+
+    // TODO: if neighboring current values (i.e. current value - 1 and current value + 1) given by currentPowerConversion.powerInWatts
+    //       are None, then just take a -1 or +1 step to explore those values
+
+    optimalMaxChargingCurrentInAmperes
   }
 
   def test(): Unit = {

@@ -28,8 +28,6 @@ object Wallbox {
 
   case class BasicStatus(rawJsonResponse: String)
 
-  // TODO: check why lastSync is "old" (only the case if no charging is taking place?)
-
   case class ExtendedStatus(
       lastSync: Instant,
       chargingPowerInWatts: Double,
