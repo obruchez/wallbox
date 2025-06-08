@@ -9,7 +9,7 @@ import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.nio.charset.StandardCharsets
 import java.time.format.DateTimeFormatter
-import java.time.{Duration, LocalDateTime}
+import java.time.{Duration, Instant, LocalDateTime, ZoneOffset}
 import java.util.Base64
 import scala.util.Try
 
@@ -31,7 +31,7 @@ object Wallbox {
   // TODO: check why lastSync is "old" (only the case if no charging is taking place?)
 
   case class ExtendedStatus(
-      lastSync: LocalDateTime,
+      lastSync: Instant,
       chargingPowerInWatts: Double,
       status: Status,
       maxChargingCurrentInAmperes: Int
@@ -44,7 +44,10 @@ object Wallbox {
 
         for {
           lastSyncStr <- c.downField("last_sync").as[String]
-          lastSync = LocalDateTime.parse(lastSyncStr, dateTimeFormatter)
+          lastSync = LocalDateTime
+            .parse(lastSyncStr, dateTimeFormatter)
+            .atZone(ZoneOffset.UTC)
+            .toInstant
           chargingPower <- c.downField("charging_power").as[Double]
           statusId <- c.downField("status_id").as[Int]
           maxChargingCurrent <- c.downField("config_data").downField("max_charging_current").as[Int]
