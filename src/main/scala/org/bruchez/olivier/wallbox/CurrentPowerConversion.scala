@@ -1,5 +1,7 @@
 package org.bruchez.olivier.wallbox
 
+import org.bruchez.olivier.wallbox.Logger.log
+
 import java.nio.file.Path
 import java.time.Instant
 import scala.collection.mutable
@@ -57,19 +59,19 @@ case class CurrentPowerConversion(
   def printObservedCurrentCounts(): Unit = {
     val countsAsString =
       observedValues.toSeq.sortBy(_._1).map(kv => s"${kv._1} A -> ${kv._2.size}").mkString(", ")
-    println(s"Observed currents: $countsAsString")
+    log(s"Observed currents: $countsAsString")
   }
 
   def printAllObservedValuesAndAverages(): Unit =
     observedValues.toSeq.sortBy(_._1).foreach { case (maxCurrenInAmperes, observedPowers) =>
       val average = weightedAverage(observedPowers)
       val timeOrTimes = if (observedPowers.size > 1) "times" else "time"
-      println(
+      log(
         f"$maxCurrenInAmperes A observed ${observedPowers.size} $timeOrTimes with a weighted average of $average%.2f W:"
       )
 
       observedPowers.sortBy(_.instant.getEpochSecond).reverse.foreach { observedPower =>
-        println(f" - ${observedPower.instant}: ${observedPower.powerInWatts}%.2f W")
+        log(f" - ${observedPower.instant}: ${observedPower.powerInWatts}%.2f W")
       }
     }
 

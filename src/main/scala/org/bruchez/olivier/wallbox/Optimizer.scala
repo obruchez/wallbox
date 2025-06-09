@@ -1,5 +1,7 @@
 package org.bruchez.olivier.wallbox
 
+import org.bruchez.olivier.wallbox.Logger.log
+
 import java.nio.file.{Path, Paths}
 import java.time.{Duration, Instant}
 import scala.util.control.Breaks.{break, breakable}
@@ -40,25 +42,17 @@ class Optimizer(
   def optimizeRepeatedly(): Unit = {
     val PeriodInMs = 5000
 
-    println("Press Ctrl-C to stop...")
+    var status = Optimizer.Status()
 
-    breakable {
-      var status = Optimizer.Status()
+    while (true) {
+      try {
+        status = optimizeOnce(status).get
 
-      while (true) {
-        try {
-          status = optimizeOnce(status).get
-
+        Thread.sleep(PeriodInMs)
+      } catch {
+        case e: Exception =>
+          log(s"Unexpected error: ${e.getMessage}")
           Thread.sleep(PeriodInMs)
-        } catch {
-          case _: InterruptedException =>
-            println("\nMonitoring interrupted")
-            break()
-
-          case e: Exception =>
-            println(s"Unexpected error: ${e.getMessage}")
-            Thread.sleep(PeriodInMs)
-        }
       }
     }
   }
@@ -66,9 +60,10 @@ class Optimizer(
   private def optimizeOnce(status: Optimizer.Status): Try[Optimizer.Status] =
     wallbox.extendedStatus().flatMap { extendedStatus =>
       if (extendedStatus.status.charging) {
+        log(s"Car charging, optimizing current")
         optimizeOnceWhileCharging(status.copy(carCharging = true))
       } else {
-        println(s"Car not charging, nothing to do")
+        log(s"Car not charging, nothing to do")
         Success(status.copy(carCharging = false))
       }
     }
@@ -83,12 +78,12 @@ class Optimizer(
       chargingPowerInWatts = wallboxExtendedStatus.chargingPowerInWatts
       maxChargingCurrentInAmperes = wallboxExtendedStatus.maxChargingCurrentInAmperes
     } yield {
-      println(f"Solar power          : $solarPowerInWatts%.2f W")
-      println(f"Grid power           : $gridPowerInWatts%.2f W")
-      println(f"Charging power       : $chargingPowerInWatts%.2f W")
-      println(f"Max. charging current: $maxChargingCurrentInAmperes A")
-      println()
+      log(f"Solar power          : $solarPowerInWatts%.2f W")
+      log(f"Grid power           : $gridPowerInWatts%.2f W")
+      log(f"Charging power       : $chargingPowerInWatts%.2f W")
+      log(f"Max. charging current: $maxChargingCurrentInAmperes A")
 
+      // TODO: do this only after waiting some given time if we changed the current (i.e. let the power stabilize)
       currentPowerConversion.addObservedValues(
         instant = Instant.now(),
         maxCurrenInAmperes = maxChargingCurrentInAmperes,
@@ -96,13 +91,11 @@ class Optimizer(
       )
 
       currentPowerConversion.printAllObservedValuesAndAverages()
-      println()
 
       val maxChargingCurrentInAmperesToSet =
         if (status.noSolarProduction) {
           // Solar panels are not producing electricity => quick charging
-          println("Solar panels are not producing electricity, using maximum current value")
-          println()
+          log("Solar panels are not producing electricity, using maximum current value")
 
           Wallbox.MaxPowerLimitInAmperes
         } else {
@@ -165,10 +158,9 @@ class Optimizer(
       val totalHouseholdConsumptionMinusChargerInWatts =
         solarPowerInWatts + gridPowerInWatts - chargingPowerInWatts
 
-      println(
+      log(
         f"Total household consumption (charger excluded): $totalHouseholdConsumptionMinusChargerInWatts%.2f W"
       )
-      println()
 
       // Estimate how different "max. charging current" values would impact the grid power
       val estimatedGridPowersInWattsByMaxChargingCurrent =
@@ -192,9 +184,8 @@ class Optimizer(
             math.abs(estimatedGridPowerInWatts)
         }
 
-      println(f"Optimal max. charging current        : $optimalMaxChargingCurrentInAmperes A")
-      println(f"Estimated grid power for that current: $estimatedGridPowerInWatts%.2f W")
-      println()
+      log(f"Optimal max. charging current        : $optimalMaxChargingCurrentInAmperes A")
+      log(f"Estimated grid power for that current: $estimatedGridPowerInWatts%.2f W")
 
       optimalMaxChargingCurrentInAmperes
     }
