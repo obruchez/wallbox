@@ -95,7 +95,7 @@ class Optimizer(
         powerInWatts = chargingPowerInWatts
       )
 
-      currentPowerConversion.printObservedCurrentCounts()
+      currentPowerConversion.printAllObservedValuesAndAverages()
       println()
 
       val maxChargingCurrentInAmperesToSet =
@@ -110,7 +110,8 @@ class Optimizer(
           optimalMaxChargingCurrentInAmperesIfSolarProduction(
             solarPowerInWatts = solarPowerInWatts,
             gridPowerInWatts = gridPowerInWatts,
-            chargingPowerInWatts = chargingPowerInWatts
+            chargingPowerInWatts = chargingPowerInWatts,
+            maxChargingCurrentInAmperes = maxChargingCurrentInAmperes
           )
         }
 
@@ -134,48 +135,69 @@ class Optimizer(
   private def optimalMaxChargingCurrentInAmperesIfSolarProduction(
       solarPowerInWatts: Double,
       gridPowerInWatts: Double,
-      chargingPowerInWatts: Double
+      chargingPowerInWatts: Double,
+      maxChargingCurrentInAmperes: Int
   ): Int = {
 
-    // Step 1: estimate total household consumption excluding charger
-    val totalHouseholdConsumptionMinusChargerInWatts =
-      solarPowerInWatts + gridPowerInWatts - chargingPowerInWatts
+    // Optimal neighbour current (i.e. current value - 1 or current value + 1)
+    val optimalNeighbourCurrent =
+      if (gridPowerInWatts > 0) {
+        // We consume electricity from the grid => decrease the current
+        maxChargingCurrentInAmperes - 1
+      } else if (gridPowerInWatts < 0) {
+        // We inject electricity to the grid => increase the current
+        maxChargingCurrentInAmperes + 1
+      } else {
+        // Do not change the current (unlikely)
+        maxChargingCurrentInAmperes
+      }
 
-    println(
-      f"Total household consumption (charger excluded): $totalHouseholdConsumptionMinusChargerInWatts%.2f W"
-    )
-    println()
+    if (!currentPowerConversion.hasGoodEstimateForCurrent(optimalNeighbourCurrent)) {
+      // Explore the neighbouring values if we don't have any estimate for actual charging power for those values
+      optimalNeighbourCurrent
+    } else {
+      // Here we use the estimates we currently have for actual charging power to determine the optimal maximum
+      // charging current. If some estimates are missing between the current "max current" value and the optimal "max
+      // current" value found by the algorithm below, then, at the next optimization step, we'll detect that we need
+      // to go in the other direction again, and we'll explore the neighbouring values again ("exploration mode" above).
 
-    // Step 2: estimate how different "max. charging current" values would impact the grid power
-    val estimatedGridPowersInWattsByMaxChargingCurrent =
-      for (
-        tentativeMaxChargingCurrentInAmperes <-
-          Wallbox.MinPowerLimitInAmperes to Wallbox.MaxPowerLimitInAmperes
-      ) yield {
-        currentPowerConversion.powerInWatts(tentativeMaxChargingCurrentInAmperes).map {
-          estimatedChargingPowerInWatts =>
-            val estimatedGridPowerInWatts =
-              totalHouseholdConsumptionMinusChargerInWatts + estimatedChargingPowerInWatts - solarPowerInWatts
+      // Estimate total household consumption excluding charger
+      val totalHouseholdConsumptionMinusChargerInWatts =
+        solarPowerInWatts + gridPowerInWatts - chargingPowerInWatts
 
-            tentativeMaxChargingCurrentInAmperes -> estimatedGridPowerInWatts
+      println(
+        f"Total household consumption (charger excluded): $totalHouseholdConsumptionMinusChargerInWatts%.2f W"
+      )
+      println()
+
+      // Estimate how different "max. charging current" values would impact the grid power
+      val estimatedGridPowersInWattsByMaxChargingCurrent =
+        for (
+          tentativeMaxChargingCurrentInAmperes <-
+            Wallbox.MinPowerLimitInAmperes to Wallbox.MaxPowerLimitInAmperes
+        ) yield {
+          currentPowerConversion.powerInWatts(tentativeMaxChargingCurrentInAmperes).map {
+            estimatedChargingPowerInWatts =>
+              val estimatedGridPowerInWatts =
+                totalHouseholdConsumptionMinusChargerInWatts + estimatedChargingPowerInWatts - solarPowerInWatts
+
+              tentativeMaxChargingCurrentInAmperes -> estimatedGridPowerInWatts
+          }
         }
-      }
 
-    val (optimalMaxChargingCurrentInAmperes, estimatedGridPowerInWatts) =
-      estimatedGridPowersInWattsByMaxChargingCurrent.flatten.minBy {
-        case (_, estimatedGridPowerInWatts) =>
-          // We want to minimize the absolute value of the grid power, i.e. consuming and injecting as little as possible
-          math.abs(estimatedGridPowerInWatts)
-      }
+      val (optimalMaxChargingCurrentInAmperes, estimatedGridPowerInWatts) =
+        estimatedGridPowersInWattsByMaxChargingCurrent.flatten.minBy {
+          case (_, estimatedGridPowerInWatts) =>
+            // We want to minimize the absolute value of the grid power, i.e. consuming and injecting as little as possible
+            math.abs(estimatedGridPowerInWatts)
+        }
 
-    println(f"Optimal max. charging current        : $optimalMaxChargingCurrentInAmperes A")
-    println(f"Estimated grid power for that current: $estimatedGridPowerInWatts%.2f W")
-    println()
+      println(f"Optimal max. charging current        : $optimalMaxChargingCurrentInAmperes A")
+      println(f"Estimated grid power for that current: $estimatedGridPowerInWatts%.2f W")
+      println()
 
-    // TODO: if neighboring current values (i.e. current value - 1 and current value + 1) given by currentPowerConversion.powerInWatts
-    //       are None, then just take a -1 or +1 step to explore those values
-
-    optimalMaxChargingCurrentInAmperes
+      optimalMaxChargingCurrentInAmperes
+    }
   }
 
   def test(): Unit = {

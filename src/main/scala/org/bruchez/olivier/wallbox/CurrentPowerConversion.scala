@@ -5,14 +5,22 @@ import java.time.Instant
 import scala.collection.mutable
 import scala.util.Try
 
+// Keep a log of (max. charging current, charging power) pairs to estimate the power from the current during the
+// optimization phase. In practice, the function is not strictly linear, even approximately, as it will plateau after
+// some value of the max. charging current.
+
 case class CurrentPowerConversion(
     maxObservedValuesPerMaxCurrent: Int,
     timeToLiveInSeconds: Int,
     decayLambda: Double
 ) {
-  private case class ObservedPower(instant: Instant, powerInWatts: Double)
+  import CurrentPowerConversion.ObservedPower
 
   private val observedValues = mutable.Map[Int, List[ObservedPower]]()
+
+  // TODO: refine this (with age of values, etc.)
+  def hasGoodEstimateForCurrent(maxCurrenInAmperes: Int): Boolean =
+    observedValues.get(maxCurrenInAmperes).exists(_.size > 5)
 
   def addObservedValues(
       instant: Instant,
@@ -20,21 +28,27 @@ case class CurrentPowerConversion(
       powerInWatts: Double
   ): Unit = {
     val observedPower = ObservedPower(instant, powerInWatts)
-    observedValues(maxCurrenInAmperes) =
-      observedPower :: observedValues.getOrElse(maxCurrenInAmperes, Nil)
+    val pastObservedPowers = observedValues.getOrElse(maxCurrenInAmperes, Nil)
+    observedValues(maxCurrenInAmperes) = observedPower :: pastObservedPowers
 
-    // TODO: only keep max N "power" values for each "max current" value
-    // TODO: only keep "power values" for a maximum of T time (e.g. 10 minutes)
-    // TODO: but always keep at least 1 value (should this be the actual latest value or an average?)
+    garbageCollect()
   }
 
-  def powerInWatts(maxCurrenInAmperes: Int): Option[Double] = {
-    // TODO: use observed values
-    // TODO: use exponential decay weighting (weight(t) = e^(-λ * t)) => give more importance to recently observed values
+  def powerInWatts(maxCurrenInAmperes: Int): Option[Double] =
+    observedValues.get(maxCurrenInAmperes).map { observedPowers =>
+      // This is guaranteed by the garbage collecting step
+      assert(observedPowers.nonEmpty)
 
-    // For now, use some heuristics; our ID.3 uses max 16 A, with 3 phases and 220 V per phase
-    Some(math.min(maxCurrenInAmperes, 16.0) * (3 * 220))
-  }
+      // val simpleAverage = observedPowers.map(_.powerInWatts).sum / observedPowers.size.toDouble
+      val weightedAverage = this.weightedAverage(observedPowers)
+
+      weightedAverage
+    }
+
+  // def powerInWatts(maxCurrenInAmperes: Int): Option[Double] = {
+  //  // For now, use some heuristics; our ID.3 uses max 16 A, with 3 phases and 220 V per phase
+  //  Some(math.min(maxCurrenInAmperes, 16.0) * (3 * 220))
+  // }
 
   def saveTo(jsonFile: Path): Unit = {
     // TODO: serialize values to JSON file
@@ -45,12 +59,69 @@ case class CurrentPowerConversion(
       observedValues.toSeq.sortBy(_._1).map(kv => s"${kv._1} A -> ${kv._2.size}").mkString(", ")
     println(s"Observed currents: $countsAsString")
   }
+
+  def printAllObservedValuesAndAverages(): Unit =
+    observedValues.toSeq.sortBy(_._1).foreach { case (maxCurrenInAmperes, observedPowers) =>
+      val average = weightedAverage(observedPowers)
+      val timeOrTimes = if (observedPowers.size > 1) "times" else "time"
+      println(
+        f"$maxCurrenInAmperes A observed ${observedPowers.size} $timeOrTimes with a weighted average of $average%.2f W:"
+      )
+
+      observedPowers.sortBy(_.instant.getEpochSecond).reverse.foreach { observedPower =>
+        println(f" - ${observedPower.instant}: ${observedPower.powerInWatts}%.2f W")
+      }
+    }
+
+  // Compute an exponentially decaying weighted average (to give more importance to recent observations)
+  private def weightedAverage(observedPowers: Seq[ObservedPower]): Double = {
+    val mostRecentEpochInSeconds = observedPowers.map(_.instant.getEpochSecond).max
+
+    val weightsAndProducts = observedPowers.map { observedPower =>
+      val ageInSeconds = mostRecentEpochInSeconds - observedPower.instant.getEpochSecond
+      val ageInMinutes = ageInSeconds.toDouble / 60.0
+
+      val weight = this.weight(ageInMinutes)
+
+      (weight, weight * observedPower.powerInWatts)
+    }
+
+    weightsAndProducts.map(_._2).sum / weightsAndProducts.map(_._1).sum
+  }
+
+  private def weight(ageInMinutes: Double): Double =
+    math.exp(-decayLambda * ageInMinutes)
+
+  private def garbageCollect(): Unit = {
+    val now = Instant.now
+
+    // Keep only recent values after the following threshold
+    val threshold = now.minusSeconds(timeToLiveInSeconds.toLong)
+
+    for ((maxCurrenInAmperes, observedPowers) <- observedValues) {
+      // Filter out old values and keep at most maxObservedValuesPerMaxCurrent values
+      val recentObservedPowers =
+        observedPowers.filter(_.instant.isAfter(threshold)).take(maxObservedValuesPerMaxCurrent)
+
+      // Let old values "die", they'll be re-explored if needed (in the "exploration mode")
+
+      if (recentObservedPowers.nonEmpty) {
+        observedValues.update(maxCurrenInAmperes, recentObservedPowers)
+      } else {
+        observedValues.remove(maxCurrenInAmperes)
+      }
+    }
+  }
 }
 
 object CurrentPowerConversion {
-  private val DefaultMaxObservedValuesPerMaxCurrent = 4096
-  private val DefaultTimeToLiveInSeconds = 10 * 60
-  private val DefaultDecayLambda = 0.9
+  private case class ObservedPower(instant: Instant, powerInWatts: Double)
+
+  private val DefaultMaxObservedValuesPerMaxCurrent = 1024
+  // Don't keep values too long
+  private val DefaultTimeToLiveInSeconds = 5 * 60
+  // A value of 0.23 will give a weight of 0.1 to observed values that are 10 minutes old
+  private val DefaultDecayLambda = 0.23
 
   def apply(): CurrentPowerConversion =
     CurrentPowerConversion(
