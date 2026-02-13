@@ -147,6 +147,7 @@ class Optimizer(
 
     if (!currentPowerConversion.hasGoodEstimateForCurrent(optimalNeighbourCurrent)) {
       // Explore the neighbouring values if we don't have any estimate for actual charging power for those values
+      log(s"Exploring neighbour current $optimalNeighbourCurrent A")
       optimalNeighbourCurrent
     } else {
       // Here we use the estimates we currently have for actual charging power to determine the optimal maximum

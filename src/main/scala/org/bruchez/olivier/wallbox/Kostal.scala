@@ -10,7 +10,10 @@ import java.time.Duration
 import java.util.Base64
 import javax.crypto.spec.{GCMParameterSpec, PBEKeySpec, SecretKeySpec}
 import javax.crypto.{Cipher, Mac, SecretKeyFactory}
-import scala.util.Try
+import org.bruchez.olivier.wallbox.Logger.log
+import scala.util.{Success, Try}
+
+// Adapted from https://github.com/kilianknoll/kostal-RESTAPI/blob/master/kostal-RESTAPI.py
 
 object Kostal {
   def apply(): Kostal = Kostal(host = sys.env("KOSTAL_HOST"), password = sys.env("KOSTAL_PASSWORD"))
@@ -28,7 +31,13 @@ case class Kostal(host: String, password: String) {
   def outputPowerInWatts(): Try[Double] = {
     for {
       _ <- login()
-      power <- getOutputPowerInWatts()
+      power <- getOutputPowerInWatts().recoverWith {
+        // Kostal inverters return HTTP 500 when in sleep/standby mode (e.g. at night),
+        // which means no solar production — treat this as 0 watts
+        case e: RuntimeException if e.getMessage.contains("Failed to get power data: 500") =>
+          log("Kostal inverter is in sleep/standby mode, assuming 0 W output")
+          Success(0.0)
+      }
     } yield power
   }
 
