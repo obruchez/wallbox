@@ -1,3 +1,5 @@
+package org.bruchez.olivier.wallbox
+
 import java.time.{LocalDateTime, Duration}
 import java.time.format.DateTimeFormatter
 import scala.io.Source

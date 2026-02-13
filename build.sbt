@@ -6,6 +6,8 @@ scalaVersion := "2.13.18"
 
 libraryDependencies += "com.beachape" %% "enumeratum" % "1.9.4"
 libraryDependencies += "com.microsoft.playwright" % "playwright" % "1.58.0"
+libraryDependencies += "com.google.apis" % "google-api-services-sheets" % "v4-rev20251110-2.0.0"
+libraryDependencies += "com.google.auth" % "google-auth-library-oauth2-http" % "1.42.1"
 
 libraryDependencies ++= Seq(
   "io.circe" %% "circe-core" % "0.14.15",

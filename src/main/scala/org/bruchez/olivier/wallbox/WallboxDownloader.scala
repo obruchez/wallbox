@@ -1,29 +1,38 @@
+package org.bruchez.olivier.wallbox
+
 import com.microsoft.playwright._
-import com.microsoft.playwright.options.WaitForSelectorState
-import java.nio.file.Paths
-import scala.util.{Try, Using}
+
+import java.nio.file.{Path, Paths, StandardCopyOption}
+import scala.util.Try
 
 // TODO: cleanup
 
 object WallboxDownloader {
 
-  private val email = "..."
-  private val password = "..."
-
-  /*def main(args: Array[String]): Unit = {
-    val result = downloadWallboxSessions()
+  def main(args: Array[String]): Unit = {
+    val config = Config.load()
+    val result = downloadWallboxSessions(
+      config.wallboxEmail,
+      config.wallboxPassword,
+      Some(Paths.get(config.wallboxCsvPath))
+    )
     result match {
       case scala.util.Success(_) =>
-        println(s"Process completed - check for $outputFile")
+        // println(s"Process completed - check for $outputFile")
+        println(s"Process completed")
         System.exit(0) // Force clean exit
       case scala.util.Failure(exception) =>
         println(s"Failed to download sessions: ${exception.getMessage}")
         exception.printStackTrace()
         System.exit(1)
     }
-  }*/
+  }
 
-  def downloadWallboxSessions(): Try[Unit] = Try {
+  def downloadWallboxSessions(
+      email: String,
+      password: String,
+      outputFileOpt: Option[Path]
+  ): Try[Unit] = Try {
     val playwright = Playwright.create()
     var browser: Browser = null
     var context: BrowserContext = null
@@ -43,9 +52,8 @@ object WallboxDownloader {
 
         page = context.newPage()
 
-        performLogin(page)
+        performLogin(page, email, password)
         downloadSessions(page)
-
       } finally {
         // Close resources gracefully, ignoring any errors during cleanup
         if (page != null) {
@@ -64,6 +72,10 @@ object WallboxDownloader {
         catch { case _: Exception => /* ignore */ }
       }
 
+    outputFileOpt.foreach { outputFile =>
+      java.nio.file.Files.copy(tempFile, outputFile, StandardCopyOption.REPLACE_EXISTING)
+    }
+
     // Parse the temporary file
     WallboxCsvParser.parseFile(tempFile.toString) match {
       case scala.util.Success(sessions) =>
@@ -78,10 +90,9 @@ object WallboxDownloader {
 
     // Optionally clean up the temp file
     java.nio.file.Files.deleteIfExists(tempFile)
-
   }
 
-  private def performLogin(page: Page): Unit = {
+  private def performLogin(page: Page, email: String, password: String): Unit = {
     println("Navigating to login page...")
     page.navigate("https://my.wallbox.com/login")
 

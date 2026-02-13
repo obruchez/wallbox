@@ -1,6 +1,9 @@
+config.json
 current-power-conversion.json
 createdocker.sh
 setenv.sh
+wallbox.csv
+wallbox-487316-65041968720c.json
 .history
 /*.iml
 /.bsp
