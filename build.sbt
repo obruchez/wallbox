@@ -17,6 +17,18 @@ libraryDependencies ++= Seq(
 
 scalafmtOnCompile := true
 
+assembly / mainClass := Some("org.bruchez.olivier.wallbox.WallboxToSheets")
+assembly / assemblyJarName := "wallbox-to-sheets.jar"
+
+assembly / assemblyMergeStrategy := {
+  case PathList("META-INF", "MANIFEST.MF") => MergeStrategy.discard
+  case PathList("META-INF", "services", _*) => MergeStrategy.concat
+  case PathList("META-INF", _*) => MergeStrategy.discard
+  case "module-info.class" => MergeStrategy.discard
+  case x if x.endsWith(".proto") => MergeStrategy.first
+  case x => MergeStrategy.defaultMergeStrategy(x)
+}
+
 enablePlugins(JavaAppPackaging, DockerPlugin)
 
 dockerBaseImage := "eclipse-temurin:11-jre"
