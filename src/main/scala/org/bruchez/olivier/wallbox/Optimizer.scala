@@ -29,7 +29,8 @@ object Optimizer {
 
 class Optimizer(
     currentPowerConversionJsonFile: Path =
-      Paths.get(sys.env("WALLBOX_CURRENT_POWER_CONVERSION_JSON"))
+      Paths.get(sys.env("WALLBOX_CURRENT_POWER_CONVERSION_JSON")),
+    emailNotifierOpt: Option[EmailNotifier] = None
 ) {
 
   implicit val currentPowerConversion: CurrentPowerConversion =
@@ -52,6 +53,12 @@ class Optimizer(
       } catch {
         case e: Exception =>
           log(s"Unexpected error: ${e.getMessage}")
+          emailNotifierOpt.foreach(
+            _.sendEmail(
+              subject = "Wallbox optimizer error",
+              body = s"Error: ${e.getMessage}\n\n${e.getStackTrace.mkString("\n")}"
+            )
+          )
           Thread.sleep(PeriodInMs)
       }
     }
@@ -108,7 +115,15 @@ class Optimizer(
           )
         }
 
-      wallbox.setMaxCurrent(maxChargingCurrentInAmperesToSet)
+      wallbox.setMaxCurrent(maxChargingCurrentInAmperesToSet).failed.foreach { e =>
+        log(s"Failed to set max current: ${e.getMessage}")
+        emailNotifierOpt.foreach(
+          _.sendEmail(
+            subject = "Wallbox: failed to set max current",
+            body = s"Error: ${e.getMessage}\n\n${e.getStackTrace.mkString("\n")}"
+          )
+        )
+      }
 
       // Check if the solar panels still produce electricity
       val newEarliestInstantWithNoSolarProductionOpt = if (solarPowerInWatts > 0.0) {
