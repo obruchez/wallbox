@@ -113,7 +113,7 @@ case class Wallbox(username: String, password: String, chargerId: String) {
   private val URL_CHARGER = "v2/charger/"
   private val URL_STATUS = "chargers/status/"
 
-  private val conn_timeout = Duration.ofMillis(3000)
+  private val conn_timeout = Duration.ofSeconds(10)
 
   private def createHttpClient(): HttpClient = {
     HttpClient
@@ -183,7 +183,7 @@ case class Wallbox(username: String, password: String, chargerId: String) {
   }
 
   def setMaxCurrent(maxCurrenInAmperes: Int): Try[Unit] =
-    Retry.withRetry() {
+    Retry.withRetry(delayMs = 5000) {
       for {
         token <- authenticationToken()
         _ <- setMaxCurrent(token, maxCurrenInAmperes)
@@ -209,7 +209,7 @@ case class Wallbox(username: String, password: String, chargerId: String) {
   }
 
   def extendedStatus(): Try[Wallbox.ExtendedStatus] =
-    Retry.withRetry() {
+    Retry.withRetry(delayMs = 5000) {
       for {
         token <- authenticationToken()
         extendedStatus <- extendedStatus(token)
