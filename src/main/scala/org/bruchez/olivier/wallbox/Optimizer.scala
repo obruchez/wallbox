@@ -10,9 +10,16 @@ import scala.util.{Success, Try}
 object Optimizer {
   private val SecondsBeforeNoSolarProduction = 10 * 60
 
+  private val StabilizationDelayInMs: Long =
+    scala.util
+      .Try(sys.env("WALLBOX_STABILIZATION_DELAY_SECONDS"))
+      .map(_.toLong * 1000)
+      .getOrElse(10000L)
+
   case class Status(
       earliestInstantWithNoSolarProductionOpt: Option[Instant] = None,
-      carCharging: Boolean = false
+      carCharging: Boolean = false,
+      lastMaxChargingCurrentInAmperesOpt: Option[Int] = None
   ) {
     // "Night mode"
     def noSolarProduction: Boolean = earliestInstantWithNoSolarProductionOpt match {
@@ -90,7 +97,6 @@ class Optimizer(
       log(f"Charging power       : $chargingPowerInWatts%.2f W")
       log(f"Max. charging current: $maxChargingCurrentInAmperes A")
 
-      // TODO: do this only after waiting some given time if we changed the current (i.e. let the power stabilize)
       currentPowerConversion.addObservedValues(
         instant = Instant.now(),
         maxCurrenInAmperes = maxChargingCurrentInAmperes,
@@ -115,6 +121,9 @@ class Optimizer(
           )
         }
 
+      val currentChanged =
+        !status.lastMaxChargingCurrentInAmperesOpt.contains(maxChargingCurrentInAmperesToSet)
+
       wallbox.setMaxCurrent(maxChargingCurrentInAmperesToSet).failed.foreach { e =>
         log(s"Failed to set max current: ${e.getMessage}")
         emailNotifierOpt.foreach(
@@ -123,6 +132,13 @@ class Optimizer(
             body = s"Error: ${e.getMessage}\n\n${e.getStackTrace.mkString("\n")}"
           )
         )
+      }
+
+      if (currentChanged) {
+        log(
+          f"Current changed to $maxChargingCurrentInAmperesToSet A, waiting ${Optimizer.StabilizationDelayInMs} ms for power to stabilize"
+        )
+        Thread.sleep(Optimizer.StabilizationDelayInMs)
       }
 
       // Check if the solar panels still produce electricity
@@ -134,8 +150,9 @@ class Optimizer(
         status.earliestInstantWithNoSolarProductionOpt
       }
 
-      status.copy(earliestInstantWithNoSolarProductionOpt =
-        newEarliestInstantWithNoSolarProductionOpt
+      status.copy(
+        earliestInstantWithNoSolarProductionOpt = newEarliestInstantWithNoSolarProductionOpt,
+        lastMaxChargingCurrentInAmperesOpt = Some(maxChargingCurrentInAmperesToSet)
       )
     }
   }
