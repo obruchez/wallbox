@@ -28,18 +28,19 @@ case class Kostal(host: String, password: String) {
   private val baseUrl = s"http://$host/api/v1"
   private var sessionId: Option[String] = None
 
-  def outputPowerInWatts(): Try[Double] = {
-    for {
-      _ <- login()
-      power <- getOutputPowerInWatts().recoverWith {
-        // Kostal inverters return HTTP 500 when in sleep/standby mode (e.g. at night),
-        // which means no solar production — treat this as 0 watts
-        case e: RuntimeException if e.getMessage.contains("Failed to get power data: 500") =>
-          log("Kostal inverter is in sleep/standby mode, assuming 0 W output")
-          Success(0.0)
-      }
-    } yield power
-  }
+  def outputPowerInWatts(): Try[Double] =
+    Retry.withRetry() {
+      for {
+        _ <- login()
+        power <- getOutputPowerInWatts().recoverWith {
+          // Kostal inverters return HTTP 500 when in sleep/standby mode (e.g. at night),
+          // which means no solar production — treat this as 0 watts
+          case e: RuntimeException if e.getMessage.contains("Failed to get power data: 500") =>
+            log("Kostal inverter is in sleep/standby mode, assuming 0 W output")
+            Success(0.0)
+        }
+      } yield power
+    }
 
   private def login(): Try[Unit] = {
     val clientNonce = new Array[Byte](12)

@@ -30,25 +30,26 @@ case class Whatwatt(host: String) {
     .connectTimeout(Duration.ofSeconds(10))
     .build()
 
-  def report(): Try[Whatwatt.Report] = {
-    Try {
-      val request = HttpRequest
-        .newBuilder()
-        .uri(URI.create(s"http://$host/api/v1/report"))
-        .timeout(Duration.ofSeconds(30))
-        .version(HttpClient.Version.HTTP_1_1)
-        .GET()
-        .build()
+  def report(): Try[Whatwatt.Report] =
+    Retry.withRetry() {
+      Try {
+        val request = HttpRequest
+          .newBuilder()
+          .uri(URI.create(s"http://$host/api/v1/report"))
+          .timeout(Duration.ofSeconds(30))
+          .version(HttpClient.Version.HTTP_1_1)
+          .GET()
+          .build()
 
-      val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
 
-      if (response.statusCode() != 200) {
-        throw new RuntimeException(s"HTTP request failed with status: ${response.statusCode()}")
-      }
+        if (response.statusCode() != 200) {
+          throw new RuntimeException(s"HTTP request failed with status: ${response.statusCode()}")
+        }
 
-      parseResponse(response.body())
-    }.flatten
-  }
+        parseResponse(response.body())
+      }.flatten
+    }
 
   private def parseResponse(jsonString: String): Try[Whatwatt.Report] = {
     Try {

@@ -183,10 +183,12 @@ case class Wallbox(username: String, password: String, chargerId: String) {
   }
 
   def setMaxCurrent(maxCurrenInAmperes: Int): Try[Unit] =
-    for {
-      token <- authenticationToken()
-      _ <- setMaxCurrent(token, maxCurrenInAmperes)
-    } yield ()
+    Retry.withRetry() {
+      for {
+        token <- authenticationToken()
+        _ <- setMaxCurrent(token, maxCurrenInAmperes)
+      } yield ()
+    }
 
   def setMaxCurrent(token: String, maxCurrenInAmperes: Int): Try[Unit] =
     updateCharger(token, "maxChargingCurrent", Json.fromInt(maxCurrenInAmperes)).map(_ => ())
@@ -207,10 +209,12 @@ case class Wallbox(username: String, password: String, chargerId: String) {
   }
 
   def extendedStatus(): Try[Wallbox.ExtendedStatus] =
-    for {
-      token <- authenticationToken()
-      extendedStatus <- extendedStatus(token)
-    } yield extendedStatus
+    Retry.withRetry() {
+      for {
+        token <- authenticationToken()
+        extendedStatus <- extendedStatus(token)
+      } yield extendedStatus
+    }
 
   def extendedStatus(token: String): Try[Wallbox.ExtendedStatus] = Try {
     val client = createHttpClient()
