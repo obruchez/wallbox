@@ -17,6 +17,7 @@ libraryDependencies ++= Seq(
 
 scalafmtOnCompile := true
 
+Compile / mainClass := Some("org.bruchez.olivier.wallbox.Main")
 assembly / mainClass := Some("org.bruchez.olivier.wallbox.WallboxToSheets")
 assembly / assemblyJarName := "wallbox-to-sheets.jar"
 
