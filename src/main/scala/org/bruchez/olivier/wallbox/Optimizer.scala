@@ -73,7 +73,32 @@ class Optimizer(
 
   private def optimizeOnce(status: Optimizer.Status): Try[Optimizer.Status] =
     wallbox.extendedStatus().flatMap { extendedStatus =>
-      if (extendedStatus.status.charging) {
+      val nowCharging = extendedStatus.status.charging
+
+      if (!status.carCharging && nowCharging) {
+        log("Charging session started")
+        emailNotifierOpt.foreach(
+          _.sendEmail(
+            subject = "Wallbox: charging session started",
+            body = "A charging session has started.",
+            throttle = false
+          )
+        )
+      } else if (status.carCharging && !nowCharging) {
+        val energyInfo = extendedStatus.addedEnergyInKwh
+          .map(e => f"$e%.2f kWh")
+          .getOrElse("unknown")
+        log(s"Charging session ended (energy added: $energyInfo)")
+        emailNotifierOpt.foreach(
+          _.sendEmail(
+            subject = "Wallbox: charging session ended",
+            body = s"The charging session has ended.\nEnergy added: $energyInfo",
+            throttle = false
+          )
+        )
+      }
+
+      if (nowCharging) {
         log(s"Car charging, optimizing current")
         optimizeOnceWhileCharging(status.copy(carCharging = true))
       } else {

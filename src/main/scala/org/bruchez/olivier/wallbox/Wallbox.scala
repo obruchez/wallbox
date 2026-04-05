@@ -32,7 +32,8 @@ object Wallbox {
       lastSync: Instant,
       chargingPowerInWatts: Double,
       status: Status,
-      maxChargingCurrentInAmperes: Int
+      maxChargingCurrentInAmperes: Int,
+      addedEnergyInKwh: Option[Double]
   )
 
   object ExtendedStatus {
@@ -49,11 +50,13 @@ object Wallbox {
           chargingPower <- c.downField("charging_power").as[Double]
           statusId <- c.downField("status_id").as[Int]
           maxChargingCurrent <- c.downField("config_data").downField("max_charging_current").as[Int]
+          addedEnergy = c.downField("added_energy").as[Double].toOption
         } yield ExtendedStatus(
           lastSync = lastSync,
           chargingPowerInWatts = chargingPower * 1000,
           status = Status.fromId(statusId),
-          maxChargingCurrentInAmperes = maxChargingCurrent
+          maxChargingCurrentInAmperes = maxChargingCurrent,
+          addedEnergyInKwh = addedEnergy
         )
       }
     }
