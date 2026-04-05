@@ -183,7 +183,7 @@ case class Wallbox(username: String, password: String, chargerId: String) {
   }
 
   def setMaxCurrent(maxCurrenInAmperes: Int): Try[Unit] =
-    Retry.withRetry(delayMs = 5000) {
+    Retry.withRetry(maxRetries = 5, delayMs = 30000) {
       for {
         token <- authenticationToken()
         _ <- setMaxCurrent(token, maxCurrenInAmperes)
@@ -209,7 +209,7 @@ case class Wallbox(username: String, password: String, chargerId: String) {
   }
 
   def extendedStatus(): Try[Wallbox.ExtendedStatus] =
-    Retry.withRetry(delayMs = 5000) {
+    Retry.withRetry(maxRetries = 5, delayMs = 30000) {
       for {
         token <- authenticationToken()
         extendedStatus <- extendedStatus(token)
