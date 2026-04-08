@@ -19,7 +19,8 @@ object Optimizer {
   case class Status(
       earliestInstantWithNoSolarProductionOpt: Option[Instant] = None,
       carCharging: Boolean = false,
-      lastMaxChargingCurrentInAmperesOpt: Option[Int] = None
+      lastMaxChargingCurrentInAmperesOpt: Option[Int] = None,
+      chargingSessionTrackerOpt: Option[ChargingSessionTracker] = None
   ) {
     // "Night mode"
     def noSolarProduction: Boolean = earliestInstantWithNoSolarProductionOpt match {
@@ -122,14 +123,19 @@ class Optimizer(
           )
         )
       } else if (status.carCharging && !nowCharging) {
+        val trackerSummary = status.chargingSessionTrackerOpt
+          .map(_.summary)
+          .getOrElse("No session data available")
         val energyInfo = extendedStatus.addedEnergyInKwh
           .map(e => f"$e%.2f kWh")
           .getOrElse("unknown")
         log(s"Charging session ended (energy added: $energyInfo)")
+        log(s"Session summary:\n$trackerSummary")
         emailNotifierOpt.foreach(
           _.sendEmail(
             subject = "Wallbox: charging session ended",
-            body = s"The charging session has ended.\nEnergy added: $energyInfo",
+            body =
+              s"The charging session has ended.\nEnergy added (Wallbox): $energyInfo\n\n$trackerSummary",
             throttle = false
           )
         )
@@ -137,10 +143,15 @@ class Optimizer(
 
       if (nowCharging) {
         log(s"Car charging, optimizing current")
-        optimizeOnceWhileCharging(status.copy(carCharging = true))
+        val newTracker = status.chargingSessionTrackerOpt.orElse(
+          Some(ChargingSessionTracker(startTime = Instant.now()))
+        )
+        optimizeOnceWhileCharging(
+          status.copy(carCharging = true, chargingSessionTrackerOpt = newTracker)
+        )
       } else {
         log(s"Car not charging, nothing to do")
-        Success(status.copy(carCharging = false))
+        Success(status.copy(carCharging = false, chargingSessionTrackerOpt = None))
       }
     }
 
@@ -171,6 +182,15 @@ class Optimizer(
       log(f"Grid power           : $gridPowerInWatts%.2f W")
       log(f"Charging power       : $chargingPowerInWatts%.2f W")
       log(f"Max. charging current: $maxChargingCurrentInAmperes A")
+
+      val updatedTracker = status.chargingSessionTrackerOpt.map(
+        _.addMeasurement(
+          instant = Instant.now(),
+          solarPowerInWatts = solarPowerInWatts,
+          chargingPowerInWatts = chargingPowerInWatts,
+          gridPowerInWatts = gridPowerInWatts
+        )
+      )
 
       currentPowerConversion.addObservedValues(
         instant = Instant.now(),
@@ -227,7 +247,8 @@ class Optimizer(
 
       status.copy(
         earliestInstantWithNoSolarProductionOpt = newEarliestInstantWithNoSolarProductionOpt,
-        lastMaxChargingCurrentInAmperesOpt = Some(maxChargingCurrentInAmperesToSet)
+        lastMaxChargingCurrentInAmperesOpt = Some(maxChargingCurrentInAmperesToSet),
+        chargingSessionTrackerOpt = updatedTracker
       )
     }
   }
