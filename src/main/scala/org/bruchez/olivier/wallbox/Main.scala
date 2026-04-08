@@ -13,6 +13,8 @@ object Main {
 
     val optimizer = new Optimizer(emailNotifierOpt = emailNotifierOpt)
 
+    optimizer.testApis()
+
     // optimizer.test()
     optimizer.optimizeRepeatedly()
   }

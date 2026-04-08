@@ -47,6 +47,43 @@ class Optimizer(
   private val wallbox = Wallbox()
   private val whatwatt = Whatwatt()
 
+  def testApis(): Unit = {
+    log("Testing all APIs on startup...")
+
+    val errors = Seq(
+      "Kostal" -> Try {
+        val power = kostal.outputPowerInWatts().get
+        log(f"Kostal OK - solar power: $power%.2f W")
+      },
+      "Whatwatt" -> Try {
+        val report = whatwatt.report().get
+        log(f"Whatwatt OK - grid power: ${report.gridPowerInWatts}%.2f W")
+      },
+      "Wallbox" -> Try {
+        val status = wallbox.extendedStatus().get
+        log(
+          s"Wallbox OK - status: ${status.status}, charging power: ${status.chargingPowerInWatts} W"
+        )
+      }
+    ).collect { case (name, scala.util.Failure(e)) =>
+      s"$name: ${e.getMessage}"
+    }
+
+    if (errors.nonEmpty) {
+      val message = errors.mkString("\n")
+      log(s"API test failures:\n$message")
+      emailNotifierOpt.foreach(
+        _.sendEmail(
+          subject = "Wallbox: API test failed on startup",
+          body = s"The following APIs failed on startup:\n\n$message",
+          throttle = false
+        )
+      )
+    } else {
+      log("All API tests passed")
+    }
+  }
+
   def optimizeRepeatedly(): Unit = {
     val PeriodInMs = 5000
 
@@ -109,7 +146,20 @@ class Optimizer(
 
   private def optimizeOnceWhileCharging(status: Optimizer.Status): Try[Optimizer.Status] = {
     for {
-      solarPowerInWatts <- kostal.outputPowerInWatts()
+      solarPowerInWatts <- kostal.outputPowerInWatts().recoverWith {
+        // Kostal inverters return HTTP 500 when in sleep/standby mode (e.g. at night),
+        // which means no solar production — treat this as 0 watts.
+        case e: RuntimeException if e.getMessage.contains("Failed to get power data: 500") =>
+          log("Kostal inverter returned HTTP 500, assuming 0 W output")
+          emailNotifierOpt.foreach(
+            _.sendEmail(
+              subject = "Wallbox: Kostal inverter API error",
+              body =
+                s"The Kostal inverter REST API returned an error after all retries: ${e.getMessage}\nFalling back to 0 W solar output."
+            )
+          )
+          Success(0.0)
+      }
       whatwattReport <- whatwatt.report()
       // Positive if consumming, negative if injecting
       gridPowerInWatts = whatwattReport.gridPowerInWatts

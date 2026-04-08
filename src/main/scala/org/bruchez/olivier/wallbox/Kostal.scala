@@ -29,18 +29,23 @@ case class Kostal(host: String, password: String) {
   private var sessionId: Option[String] = None
 
   def outputPowerInWatts(): Try[Double] =
-    Retry.withRetry() {
-      for {
-        _ <- login()
-        power <- getOutputPowerInWatts().recoverWith {
-          // Kostal inverters return HTTP 500 when in sleep/standby mode (e.g. at night),
-          // which means no solar production — treat this as 0 watts
-          case e: RuntimeException if e.getMessage.contains("Failed to get power data: 500") =>
-            log("Kostal inverter is in sleep/standby mode, assuming 0 W output")
-            Success(0.0)
+    Retry
+      .withRetry() {
+        // Reuse existing session if available, only login if needed
+        val loginIfNeeded = if (sessionId.isEmpty) login() else Success(())
+
+        loginIfNeeded.flatMap { _ =>
+          getOutputPowerInWatts().recoverWith {
+            // Session might have expired — re-login and retry once
+            case _: RuntimeException if sessionId.isDefined =>
+              sessionId = None
+              for {
+                _ <- login()
+                power <- getOutputPowerInWatts()
+              } yield power
+          }
         }
-      } yield power
-    }
+      }
 
   private def login(): Try[Unit] = {
     val clientNonce = new Array[Byte](12)
@@ -255,26 +260,44 @@ case class Kostal(host: String, password: String) {
 
     val request = HttpRequest
       .newBuilder()
-      .uri(URI.create(s"$baseUrl/processdata/devices:local:ac/InvOut_P"))
+      .uri(URI.create(s"$baseUrl/processdata/devices:local:ac"))
       .header("Authorization", s"Session $sid")
+      .header("Content-type", "application/json")
+      .header("Accept", "application/json")
       .GET()
       .build()
 
     val response = client.send(request, HttpResponse.BodyHandlers.ofString())
 
     if (response.statusCode() != 200) {
-      throw new RuntimeException(s"Failed to get power data: ${response.statusCode()}")
+      throw new RuntimeException(
+        s"Failed to get power data: ${response.statusCode()} - ${response.body()}"
+      )
     }
 
     val json = parse(response.body()).getOrElse(throw new RuntimeException("Invalid JSON"))
-    val cursor = json.hcursor
 
-    cursor.downArray
+    // Response is an array of processdata entries, each with an "id" and "value" field.
+    // Look for power output: try "InvOut_P" first, then fall back to "P".
+    val processDataEntries = json.hcursor.downArray
       .downField("processdata")
-      .downArray
-      .downField("value")
-      .as[Double]
-      .getOrElse(throw new RuntimeException("Could not parse power value"))
+      .focus
+      .flatMap(_.asArray)
+      .getOrElse(throw new RuntimeException(s"Could not parse processdata from response"))
+
+    val powerIds = Seq("InvOut_P", "P")
+
+    powerIds
+      .flatMap { id =>
+        processDataEntries.find(_.hcursor.downField("id").as[String].toOption.contains(id))
+      }
+      .headOption
+      .flatMap(_.hcursor.downField("value").as[Double].toOption)
+      .getOrElse(
+        throw new RuntimeException(
+          s"Could not find power value (looked for ${powerIds.mkString(", ")}) in response: ${response.body()}"
+        )
+      )
   }
 
   private def hmacSha256(key: Array[Byte], data: Array[Byte]): Array[Byte] = {
