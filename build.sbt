@@ -50,4 +50,4 @@ dockerBuildOptions ++= Seq("--platform", "linux/amd64,linux/arm64")
 
 Docker / maintainer := "olivier@bruchez.org"
 Docker / packageName := "wallbox"
-Docker / version := "1.0.12"
+Docker / version := "1.0.13"

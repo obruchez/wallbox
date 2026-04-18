@@ -112,7 +112,8 @@ object Wallbox {
 case class Wallbox(username: String, password: String, chargerId: String) {
 
   private val BASEURL = "https://api.wall-box.com/"
-  private val URL_AUTHENTICATION = "auth/token/user"
+  private val AUTH_BASEURL = "https://user-api.wall-box.com/"
+  private val URL_AUTHENTICATION = "users/signin"
   private val URL_CHARGER = "v2/charger/"
   private val URL_STATUS = "chargers/status/"
 
@@ -152,9 +153,10 @@ case class Wallbox(username: String, password: String, chargerId: String) {
       credentials.getBytes(StandardCharsets.UTF_8)
     )
 
-    val request = createRequestBuilder(BASEURL + URL_AUTHENTICATION)
+    val request = createRequestBuilder(AUTH_BASEURL + URL_AUTHENTICATION)
       .header("Authorization", s"Basic $encodedCredentials")
-      .POST(HttpRequest.BodyPublishers.ofString(""))
+      .header("Partner", "wallbox")
+      .GET()
       .build()
 
     val response = client.send(request, HttpResponse.BodyHandlers.ofString())
@@ -162,10 +164,19 @@ case class Wallbox(username: String, password: String, chargerId: String) {
 
     parse(responseBody) match {
       case Right(json) =>
-        json.hcursor.downField("jwt").as[String] match {
-          case Right(jwt) => jwt
-          case Left(_)    => throw new RuntimeException("JWT token not found in response")
-        }
+        // New API returns the token under "data.attributes.token"; keep "jwt" as fallback
+        val tokenCursor = json.hcursor
+        val tokenOpt = tokenCursor
+          .downField("data")
+          .downField("attributes")
+          .downField("token")
+          .as[String]
+          .toOption
+          .orElse(tokenCursor.downField("jwt").as[String].toOption)
+
+        tokenOpt.getOrElse(
+          throw new RuntimeException(s"Access token not found in response: $responseBody")
+        )
       case Left(error) =>
         throw new RuntimeException(s"Failed to parse JSON response: ${error.getMessage}")
     }
